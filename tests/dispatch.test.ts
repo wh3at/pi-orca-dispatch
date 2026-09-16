@@ -246,3 +246,26 @@ test("windows starts the child through one base64 command both Windows shells pa
     "'/usr/bin/node' '/a/launch.mjs' '/job.json'",
   );
 });
+
+test("only the model identity is persisted, never the rest of Pi's model object", async (t) => {
+  const f = await fixture(t);
+  // Pi passes its full model object at runtime; only provider and id may be stored.
+  const model = {
+    provider: "provider",
+    id: "exact/model",
+    api: "openai-completions",
+    baseUrl: "https://internal.example/v1",
+    cost: { input: 0.15, output: 0.6 },
+    compat: { supportsStore: false },
+  };
+  const stored = await dispatchTask("案B", { ...f.input, model }, {
+    preflight: async () => ({ worktreeId: "pinned", worktreePath: f.root }),
+    launchTerminal: async () => ({ handle: "child" }),
+  });
+  assert.deepEqual(stored.job.model, { provider: "provider", id: "exact/model" });
+  const raw = await readFile(stored.path, "utf8");
+  assert.ok(!raw.includes("baseUrl") && !raw.includes("internal.example") && !raw.includes("compat"));
+  assert.equal(stored.job.args[stored.job.args.indexOf("--provider") + 1], "provider");
+  assert.equal(stored.job.args[stored.job.args.indexOf("--model") + 1], "exact/model");
+  assert.deepEqual(await listJobs(f.sessionDir, "parent-1"), [stored]);
+});

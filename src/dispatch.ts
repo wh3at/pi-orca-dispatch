@@ -49,7 +49,9 @@ export async function dispatchTask(
   const snapshot = captureSnapshot(input.manager, input.cwd);
   const launch = input.launchCommand ?? currentPiCommand();
   const activeTools = [...input.activeTools];
-  const model = { ...input.model };
+  // Pi hands over its full model object. Only the identity is stored, so job.json
+  // stays readable and no endpoint or pricing detail is copied into the job.
+  const model = { provider: input.model.provider, id: input.model.id };
   const title = taskTitle(prompt);
   const observerPath = join(input.packageDir, "observer.ts");
   // A dispatched session may itself dispatch. Do not add another copy of its
