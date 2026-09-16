@@ -21,7 +21,6 @@ interface Context {
   waitForIdle?(): Promise<void>;
   ui: {
     notify(message: string, level?: "info" | "warning" | "error"): void;
-    setStatus(key: string, value: string | undefined): void;
     getEditorText(): string;
     setEditorText(value: string): void;
     editor(title: string, initialText?: string): Promise<string | undefined>;
@@ -43,61 +42,24 @@ interface PiAPI {
 export default function orcaDispatch(pi: PiAPI): void {
   const packageDir = dirname(fileURLToPath(import.meta.url));
   let generation = 0;
-  let activeContext: Context | undefined;
-  let storedJobs: StoredJob[] = [];
   let busy = false;
-  let refreshRunning = false;
-  let timer: ReturnType<typeof setInterval> | undefined;
 
+  // Pi replaces or reloads sessions in place, so bumping this invalidates an in-flight dispatch.
+  pi.on("session_start", () => { generation++; });
+  pi.on("session_shutdown", () => { generation++; });
 
-  async function refresh(): Promise<void> {
-    const ctx = activeContext;
-    const epoch = generation;
-    if (!ctx?.hasUI || refreshRunning) return;
-    refreshRunning = true;
-    try {
-      const current = await Promise.all(storedJobs.map(async (stored) => ({ stored, status: await statusOf(stored) })));
-      if (epoch !== generation) return;
-      if (current.length === 0) { ctx.ui.setStatus("orca-dispatch", undefined); return; }
-      const working = current.filter((item) => ["working", "starting"].includes(item.status.state)).length;
-      const waiting = current.filter((item) => ["idle", "ready"].includes(item.status.state)).length;
-      const errors = current.filter((item) => ["failed", "blocked", "unknown"].includes(item.status.state)).length;
-      const parts = [working ? `${working} 起動・実行中` : "", waiting ? `${waiting} 待機中` : "", errors ? `${errors} 要確認` : ""].filter(Boolean);
-      ctx.ui.setStatus("orca-dispatch", `Orca: ${parts.length ? parts.join(" / ") : "終了"} · --list`);
-    } finally { refreshRunning = false; }
+  async function load(ctx: Context): Promise<StoredJob[]> {
+    const sessionDir = resolveSessionDir(ctx.sessionManager.getSessionDir(), ctx.cwd);
+    return listJobs(sessionDir, ctx.sessionManager.getSessionId());
   }
-
-  async function load(ctx: Context): Promise<void> {
-    const epoch = generation;
-    const jobs = await listJobs(resolveSessionDir(ctx.sessionManager.getSessionDir(), ctx.cwd), ctx.sessionManager.getSessionId());
-    if (epoch === generation) storedJobs = jobs;
-  }
-
-  pi.on("session_start", async (_event, ctx) => {
-    generation++;
-    activeContext = ctx;
-    storedJobs = [];
-    if (timer) clearInterval(timer);
-    try { await load(ctx); await refresh(); }
-    catch { /* A stale optional job index must not prevent pi from starting. */ }
-    timer = setInterval(() => { void refresh().catch(() => {}); }, 3000);
-    timer.unref();
-  });
-  pi.on("session_shutdown", (_event, ctx) => {
-    generation++;
-    activeContext = undefined;
-    if (timer) clearInterval(timer);
-    timer = undefined;
-    ctx.ui.setStatus("orca-dispatch", undefined);
-  });
 
   async function showJobs(ctx: Context): Promise<void> {
-    await load(ctx);
-    if (storedJobs.length === 0) {
+    const jobs = await load(ctx);
+    if (jobs.length === 0) {
       ctx.ui.notify("この会話から送り出した作業はありません。", "info");
       return;
     }
-    const rows = await Promise.all(storedJobs.map(async (stored, index) => ({
+    const rows = await Promise.all(jobs.map(async (stored, index) => ({
       stored,
       status: await statusOf(stored),
       index,
@@ -175,8 +137,6 @@ export default function orcaDispatch(pi: PiAPI): void {
       if (!unused) keptFiles.push(stored.job.sessionFile);
       if (!tabGone) failures.push(`${stored.job.title}: タブを閉じられませんでした`);
     }
-    await load(ctx);
-    await refresh();
     const lines = [`${removed.length} 件を片付けました。`];
     if (keptFiles.length) {
       lines.push(`子タブで作業済みの派生セッション ${keptFiles.length} 件は残しました:\n${keptFiles.slice(0, 3).join("\n")}${keptFiles.length > 3 ? `\nほか ${keptFiles.length - 3} 件` : ""}`);
@@ -242,16 +202,9 @@ export default function orcaDispatch(pi: PiAPI): void {
           isCurrent,
         });
         if (!isCurrent()) return;
-        storedJobs.unshift(stored);
-        await refresh();
-        ctx.ui.notify(`Orca の別タブへ送り出しました: ${stored.job.title}\n元の会話をそのまま続けられます。`, "info");
         if (stored.receipt.warning) ctx.ui.notify(stored.receipt.warning, "warning");
       } catch (error) {
         if (!isCurrent()) return;
-        if (error instanceof DispatchError && error.stored) {
-          storedJobs.unshift(error.stored);
-          await refresh();
-        }
         const ambiguous = error instanceof DispatchError && error.ambiguous;
         const message = error instanceof Error ? error.message : String(error);
         const recovery = error instanceof DispatchError && error.stored ? `\n派生セッション: ${error.stored.job.sessionFile}` : "";

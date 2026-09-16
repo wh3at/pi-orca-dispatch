@@ -1,6 +1,6 @@
 # pi-orca-dispatch
 
-A [Pi](https://github.com/earendil-works/pi) extension for handing the current conversation to another [Orca](https://www.onorca.dev) tab as a background session, without switching the tab you are working in.
+A [Pi](https://github.com/earendil-works/pi) extension for handing the current conversation to a new [Orca](https://www.onorca.dev) tab, which opens with the same folder, model, and tools while the parent session stays untouched.
 
 ## Install
 
@@ -57,10 +57,12 @@ Send an instruction to a new tab:
 Then the extension:
 
 1. Captures the active branch of this conversation into a new session file. The parent session file is never modified, and your editor draft is left alone.
-2. Creates an Orca terminal tab in the same worktree, titled `pi: <first line of the instruction>`, without switching focus.
+2. Creates an Orca terminal tab in the same worktree, titled `pi: <first line of the instruction>`, and switches to it.
 3. Starts Pi there with the same provider, model, thinking level, and active tools, and delivers the instruction as its first message.
 
 The parent conversation stays free for other work, and either session can dispatch again.
+
+A successful dispatch reports nothing: the new tab simply becomes the active one. Warnings (for example when Orca could not reveal the tab) and errors are still shown, and a failed dispatch leaves the instruction in the editor when nothing else is being typed.
 
 Without arguments, `/orca-dispatch` opens a multi-line editor for the instruction. Canceling it sends nothing.
 
@@ -70,7 +72,7 @@ Without arguments, `/orca-dispatch` opens a multi-line editor for the instructio
 /orca-dispatch --help    Show the resolved Orca CLI and the available flags
 ```
 
-While jobs exist, a status line reports the live count, for example `Orca: 1 起動・実行中 / 2 待機中 · --list`.
+### `--list`
 
 ### `--list`
 

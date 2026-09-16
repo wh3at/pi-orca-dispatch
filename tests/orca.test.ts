@@ -32,7 +32,7 @@ test('preflight uses the enclosing worktree and preserves its explicit ID', asyn
   } finally { await fixture.clean(); }
 });
 
-test('launch passes literal argv and creates without changing focus', async () => {
+test('launch passes literal argv and reveals the created tab', async () => {
   const fixture = await mockCli(`
     const fs = require('node:fs');
     const path = require('node:path');
@@ -48,8 +48,7 @@ test('launch passes literal argv and creates without changing focus', async () =
       handle: 'term-123', surface: 'visible',
     });
     const args = JSON.parse(await readFile(join(fixture.cwd, 'args.json'), 'utf8'));
-    assert.deepEqual(args, ['terminal', 'create', '--worktree', 'id:repo::/workspace', '--title', title, '--command', command, '--json']);
-    assert.equal(args.includes('--focus'), false);
+    assert.deepEqual(args, ['terminal', 'create', '--worktree', 'id:repo::/workspace', '--title', title, '--command', command, '--focus', '--json']);
     await assert.rejects(readFile(join(fixture.cwd, 'SHOULD_NOT_EXIST')), { code: 'ENOENT' });
   } finally { await fixture.clean(); }
 });

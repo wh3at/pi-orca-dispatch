@@ -251,11 +251,11 @@ export async function preflight(options: OrcaOptions): Promise<OrcaTarget> {
   return { worktreeId: worktree.id, worktreePath };
 }
 
-/** Creates an inactive tab. Never switches the user's current tab or retries a mutation. */
+/** Creates the tab and reveals it, so the dispatched session becomes the active one. */
 export async function launchTerminal(options: LaunchTerminalOptions): Promise<LaunchedTerminal> {
   const selector = options.worktreeId ? `id:${options.worktreeId}` : `path:${resolve(options.cwd)}`;
   const result = await callOrca(
-    ['terminal', 'create', '--worktree', selector, '--title', options.title, '--command', options.command, '--json'],
+    ['terminal', 'create', '--worktree', selector, '--title', options.title, '--command', options.command, '--focus', '--json'],
     options,
     true,
   );

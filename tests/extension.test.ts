@@ -11,7 +11,6 @@ test("extension exposes one independent command and cancelling its editor does n
   const events = new Map<string, Function>();
   let command: { handler: Function; getArgumentCompletions: Function } | undefined;
   const notices: string[] = [];
-  const statuses: unknown[] = [];
   const pi = {
     registerCommand(name: string, options: typeof command) { assert.equal(name, "orca-dispatch"); command = options; },
     on(event: string, handler: Function) { events.set(event, handler); },
@@ -29,7 +28,6 @@ test("extension exposes one independent command and cancelling its editor does n
     isIdle: () => true,
     ui: {
       notify(message: string) { notices.push(message); },
-      setStatus(_key: string, value: unknown) { statuses.push(value); },
       getEditorText: () => "existing draft", setEditorText() { throw new Error("must preserve editor"); },
       editor: async () => undefined,
       select: async () => undefined,

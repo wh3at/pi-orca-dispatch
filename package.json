@@ -1,7 +1,7 @@
 {
   "name": "pi-orca-dispatch",
   "version": "0.1.0",
-  "description": "Dispatch the current Pi conversation to a background Orca tab with the same folder, model, and tools, without switching the parent session.",
+  "description": "Dispatch the current Pi conversation to a new Orca tab that opens with the same folder, model, and tools, leaving the parent session untouched.",
   "type": "module",
   "license": "MIT",
   "keywords": ["pi-package", "pi-extension", "pi-coding-agent", "orca"],
