@@ -36,7 +36,7 @@ export function currentPiCommand(
 ): LaunchCommand {
   const entrypoint = argv[1];
   if (!entrypoint || !existsSync(entrypoint)) {
-    throw new Error("pi の起動ファイルを特定できません。Node.js 版の pi から実行してください。");
+    throw new Error("Piの起動パスが見つかりません。このPiを再起動してください。");
   }
   return {
     command: [executable, isAbsolute(entrypoint) ? entrypoint : resolve(entrypoint)],
