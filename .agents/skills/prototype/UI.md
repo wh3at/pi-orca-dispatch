@@ -37,7 +37,7 @@ In both sub-shapes the floating bottom bar is identical.
 
 Default to **3 variants**. More than 5 stops being radically different and starts being noise, so cap there.
 
-Write down the plan in one line, in the prototype's location or a top-of-file comment:
+Write down the plan in one line in a Markdown file beside the prototype:
 
 > "Three variants of the settings page, switchable via `?variant=`, on the existing `/settings` route."
 
@@ -58,7 +58,6 @@ Variants must be **structurally different**: different layout, different informa
 Create a single switcher component on the route:
 
 ```tsx
-// pseudo-code, adapt to the project's framework
 const variant = searchParams.get('variant') ?? 'A';
 return (
   <>
