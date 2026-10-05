@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dispatchTask, DispatchError } from "../src/dispatch.ts";
-import { OrcaError } from "../src/orca.ts";
+import { OrcaError, type LaunchTerminalOptions } from "../src/orca.ts";
 import { listJobs, listOrphanJobs, removeJob, snapshotUnused, statusOf } from "../src/jobs.ts";
 import { resolveSessionDir } from "../src/jobs.ts";
 import { inheritResourceArgs, launchShellCommand, taskTitle } from "../src/launch-plan.ts";
@@ -34,7 +34,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
     getSessionId: () => header.id, getSessionFile: () => parent,
     getLeafId: () => entries.at(-1)?.id ?? null,
   };
-  const input = { manager, sessionDir, cwd, model: { provider: "provider", id: "exact/model" }, thinkingLevel: "medium", activeTools: ["read", "bash", "custom_tool"], packageDir, launchCommand: { command: [process.execPath, join(root, "fake-pi.mjs")], resourceArgs: [] } };
+  const input = { manager, sessionDir, cwd, configPath: join(root, "orca-dispatch.json"), sourceTerminalHandle: "source-pane", model: { provider: "provider", id: "exact/model" }, thinkingLevel: "medium", activeTools: ["read", "bash", "custom_tool"], packageDir, launchCommand: { command: [process.execPath, join(root, "fake-pi.mjs")], resourceArgs: [] } };
   return { root, cwd, sessionDir, header, entries, parent, original, manager, input };
 }
 
@@ -56,6 +56,8 @@ test("dispatch launches a real child runner with exact instruction/model/cwd and
     launchTerminal: async (options) => {
       calls++;
       assert.equal(options.worktreeId, "pinned");
+      assert.equal(options.placement, "split");
+      assert.equal(options.sourceTerminalHandle, "source-pane");
       assert.ok(!options.command.includes(prompt));
       await exec("/bin/sh", ["-c", options.command], { cwd: f.root });
       return { handle: "terminal-1" };
@@ -268,4 +270,35 @@ test("only the model identity is persisted, never the rest of Pi's model object"
   assert.equal(stored.job.args[stored.job.args.indexOf("--provider") + 1], "provider");
   assert.equal(stored.job.args[stored.job.args.indexOf("--model") + 1], "exact/model");
   assert.deepEqual(await listJobs(f.sessionDir, "parent-1"), [stored]);
+});
+
+test("global placement changes apply on the next dispatch and tab mode needs no source pane", async (t) => {
+  const f = await fixture(t);
+  const placements: string[] = [];
+  const deps = {
+    preflight: async () => ({ worktreeId: "pinned", worktreePath: f.root }),
+    launchTerminal: async (options: LaunchTerminalOptions) => {
+      placements.push(options.placement!);
+      return { handle: "child" };
+    },
+  };
+  await dispatchTask("split", f.input, deps);
+  await writeFile(f.input.configPath, JSON.stringify({ placement: "tab" }));
+  await dispatchTask("tab", { ...f.input, sourceTerminalHandle: "" }, deps);
+  await writeFile(f.input.configPath, JSON.stringify({ placement: "split" }));
+  await dispatchTask("split again", f.input, deps);
+  assert.deepEqual(placements, ["split", "tab", "split"]);
+});
+
+test("invalid configuration and missing source pane leave sessions untouched", async (t) => {
+  const f = await fixture(t);
+  const deps = {
+    preflight: async () => { throw new Error("must not preflight"); },
+    launchTerminal: async () => { throw new Error("must not launch"); },
+  };
+  await assert.rejects(dispatchTask("task", { ...f.input, sourceTerminalHandle: "" }, deps), /実行元のペイン/u);
+  await writeFile(f.input.configPath, '{"placement":"invalid"}');
+  await assert.rejects(dispatchTask("task", f.input, deps), /placement/u);
+  assert.deepEqual(await readdir(f.sessionDir), ["parent.jsonl"]);
+  assert.equal(await readFile(f.parent, 'utf8'), f.original);
 });

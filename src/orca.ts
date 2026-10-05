@@ -1,3 +1,4 @@
+import type { Placement } from './config.ts';
 import { execFile } from 'node:child_process';
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { delimiter, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -17,6 +18,8 @@ export interface OrcaTarget {
 export interface LaunchTerminalOptions extends OrcaOptions {
   title: string;
   command: string;
+  placement?: Placement;
+  sourceTerminalHandle?: string;
   /** Pass the ID returned by preflight to pin the workspace. */
   worktreeId?: string;
 }
@@ -57,6 +60,10 @@ const PRE_MUTATION_ERRORS = new Set([
   'unknown_command',
   'runtime_unavailable',
   'incompatible_runtime',
+  'terminal_handle_stale',
+  'terminal_exited',
+  'terminal_gone',
+  'no_active_terminal',
 ]);
 
 /** The CLI name Orca installs per platform. Linux avoids the GNOME screen reader. */
@@ -251,15 +258,18 @@ export async function preflight(options: OrcaOptions): Promise<OrcaTarget> {
   return { worktreeId: worktree.id, worktreePath };
 }
 
-/** Creates the tab and reveals it, so the dispatched session becomes the active one. */
 export async function launchTerminal(options: LaunchTerminalOptions): Promise<LaunchedTerminal> {
+  const placement = options.placement ?? 'split';
+  const source = options.sourceTerminalHandle ?? process.env.ORCA_TERMINAL_HANDLE;
+  if (placement === 'split' && !nonempty(source)) {
+    throw new OrcaError('実行元のペインを特定できません。Orca のターミナルペイン内から /orca-dispatch を実行してください。', 'orca_source_missing', false);
+  }
   const selector = options.worktreeId ? `id:${options.worktreeId}` : `path:${resolve(options.cwd)}`;
-  const result = await callOrca(
-    ['terminal', 'create', '--worktree', selector, '--title', options.title, '--command', options.command, '--focus', '--json'],
-    options,
-    true,
-  );
-  const terminal = object(result.terminal);
+  const args = placement === 'tab'
+    ? ['terminal', 'create', '--worktree', selector, '--title', options.title, '--command', options.command, '--focus', '--json']
+    : ['terminal', 'split', '--terminal', source!, '--command', options.command, '--json'];
+  const result = await callOrca(args, options, true);
+  const terminal = object(placement === 'tab' ? result.terminal : result.split);
   if (!nonempty(terminal?.handle)) {
     throw new OrcaError(
       'Orca confirmed a request without a terminal handle. Check Orca before dispatching again.',
@@ -287,7 +297,6 @@ export async function switchTerminal(options: OrcaOptions & { handle: string }):
   }
 }
 
-/** Closes one tab. Only `/orca-dispatch --clean` calls this, best-effort. */
 export async function closeTerminal(options: OrcaOptions & { handle: string }): Promise<void> {
   const result = await callOrca(
     ['terminal', 'close', '--terminal', options.handle, '--json'],

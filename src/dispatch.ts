@@ -4,6 +4,7 @@ import type { DispatchJob, StoredJob } from "./jobs.ts";
 import { createJobDirectory, writePrivate } from "./jobs.ts";
 import { currentPiCommand, launchShellCommand, taskTitle } from "./launch-plan.ts";
 import { preflight, launchTerminal, OrcaError } from "./orca.ts";
+import { readPlacement } from "./config.ts";
 
 export interface DispatchInput {
   manager: Parameters<typeof captureSnapshot>[0];
@@ -14,6 +15,8 @@ export interface DispatchInput {
   activeTools: string[];
   packageDir: string;
   orcaCommand?: string;
+  configPath?: string;
+  sourceTerminalHandle?: string;
   /** False after the parent switches sessions or shuts down. */
   isCurrent?: () => boolean;
   launchCommand?: ReturnType<typeof currentPiCommand>;
@@ -39,12 +42,17 @@ export async function dispatchTask(
   input: DispatchInput,
   deps: DispatchDependencies = { preflight, launchTerminal },
 ): Promise<StoredJob> {
-  if (!prompt.trim()) throw new DispatchError("別タブへ渡す指示を入力してください。");
+  if (!prompt.trim()) throw new DispatchError("Orca へ渡す指示を入力してください。");
   if (prompt.includes("\0")) throw new DispatchError("指示には NUL 文字を使用できません。");
   const checkCurrent = () => {
     if (input.isCurrent && !input.isCurrent()) throw new DispatchError("元セッションが切り替わったため、起動を中止しました。");
   };
   checkCurrent();
+  const placement = readPlacement(input.configPath);
+  const sourceTerminalHandle = input.sourceTerminalHandle ?? process.env.ORCA_TERMINAL_HANDLE;
+  if (placement === "split" && !sourceTerminalHandle?.trim()) {
+    throw new DispatchError("実行元のペインを特定できません。Orca のターミナルペイン内から /orca-dispatch を実行してください。");
+  }
   // Capture all live state together before the first await. No parent mutation.
   const snapshot = captureSnapshot(input.manager, input.cwd);
   const launch = input.launchCommand ?? currentPiCommand();
@@ -102,6 +110,8 @@ export async function dispatchTask(
     const terminal = await deps.launchTerminal({
       cwd: input.cwd,
       worktreeId: target.worktreeId,
+      placement,
+      sourceTerminalHandle,
       title,
       command: launchShellCommand(process.execPath, join(input.packageDir, "bin", "launch.mjs"), jobPath),
       orcaCommand: input.orcaCommand,
@@ -116,6 +126,6 @@ export async function dispatchTask(
   }
   // Failure to save a receipt must never trigger another terminal creation.
   try { await writePrivate(join(directory, "receipt.json"), JSON.stringify(stored.receipt) + "\n"); }
-  catch { stored.receipt.warning = "起動済みですがタブ情報を保存できませんでした。Orca のタブから開いてください。"; }
+  catch { stored.receipt.warning = "起動済みですがターミナル情報を保存できませんでした。Orca から開いてください。"; }
   return stored;
 }
