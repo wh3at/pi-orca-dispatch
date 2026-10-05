@@ -1,6 +1,6 @@
 # pi-orca-dispatch
 
-A [Pi](https://github.com/earendil-works/pi) extension for handing the current conversation to a new [Orca](https://www.onorca.dev) tab, which opens with the same folder, model, and tools while the parent session stays untouched.
+A [Pi](https://github.com/earendil-works/pi) extension for handing the current conversation to a new [Orca](https://www.onorca.dev) split pane, which opens with the same folder, model, and tools while the parent session stays untouched.
 
 ## Install
 
@@ -14,8 +14,8 @@ Restart Pi after installation.
 
 ### Requirements
 
-- **Orca** running on the same machine, with its CLI registered. SSH workspaces and paired remote runtimes are refused, because the new tab has to read this machine's session files.
-- **Pi started inside an Orca-managed worktree.** Dispatch resolves the enclosing worktree first and stops when the current directory is outside it.
+- **Orca** running on the same machine, with its CLI registered. SSH workspaces and paired remote runtimes are refused, because the new terminal has to read this machine's session files.
+- **Pi started inside an Orca terminal pane in a managed worktree.** Split mode requires `ORCA_TERMINAL_HANDLE` to identify the source pane; it never falls back to the active pane or a new tab. Dispatch stops when the current directory is outside the worktree.
 - **Node.js 22.19.0 or later**, which is also Pi's own requirement.
 
 The Orca CLI is located without any extension-specific configuration:
@@ -46,9 +46,23 @@ Or register a checkout as a local package instead:
 pi install /absolute/path/to/pi-orca-dispatch
 ```
 
+## Global configuration
+
+To opt into new tabs instead of split panes, create `~/.pi/agent/orca-dispatch.json`:
+
+```json
+{
+  "placement": "tab"
+}
+```
+
+When `PI_CODING_AGENT_DIR` is set, the file lives in that directory instead. Set `placement` to `"split"` to explicitly select split panes. A missing file or omitted field defaults to split panes. The file must contain a JSON object; invalid JSON, invalid placement values, and read failures stop dispatch.
+
+Configuration is read on every dispatch, so changes apply without restarting Pi. Only this global file is used; project configuration and per-command placement flags are not supported. Tab mode preserves the existing `pi: <first line>` tab title and focuses the created tab.
+
 ## Usage
 
-Send an instruction to a new tab:
+Send an instruction to a new terminal:
 
 ```text
 /orca-dispatch 失敗しているテストを直して
@@ -57,12 +71,12 @@ Send an instruction to a new tab:
 Then the extension:
 
 1. Captures the active branch of this conversation into a new session file. The parent session file is never modified, and your editor draft is left alone.
-2. Creates an Orca terminal tab in the same worktree, titled `pi: <first line of the instruction>`, and switches to it.
+2. Splits the pane running this Pi session and focuses the new pane. Direction is left to Orca (currently a right-hand, half-width split). The parent tab is not renamed; the child pane title is managed by Pi and Orca.
 3. Starts Pi there with the same provider, model, thinking level, and active tools, and delivers the instruction as its first message.
 
 The parent conversation stays free for other work, and either session can dispatch again.
 
-A successful dispatch reports nothing: the new tab simply becomes the active one. Warnings (for example when Orca could not reveal the tab) and errors are still shown, and a failed dispatch leaves the instruction in the editor when nothing else is being typed.
+A successful dispatch reports nothing: the new terminal becomes active. Warnings and errors are still shown, and a failed dispatch leaves the instruction in the editor when nothing else is being typed and creation is known not to have occurred.
 
 Without arguments, `/orca-dispatch` opens a multi-line editor for the instruction. Canceling it sends nothing.
 
@@ -74,15 +88,13 @@ Without arguments, `/orca-dispatch` opens a multi-line editor for the instructio
 
 ### `--list`
 
-### `--list`
-
-Lists the sessions dispatched from this conversation with their current state (`起動待ち`, `起動済み`, `実行中`, `待機中`, `終了`, `エラー終了`, `起動エラー`, `起動状況未確認`) and opens the selected Orca tab. When the tab is already gone, the derived session file to resume is reported instead.
+Lists the sessions dispatched from this conversation with their current state (`起動待ち`, `起動済み`, `実行中`, `待機中`, `終了`, `エラー終了`, `起動エラー`, `起動状況未確認`) and opens the selected Orca terminal. When the terminal is already gone, the derived session file to resume is reported instead.
 
 ### `--clean`
 
-By default, `--clean` only retires jobs that are finished (`終了`, `エラー終了`, `起動エラー`), then closes their Orca tabs. Running children are closed and interrupted only through the explicit "close everything" choice, which asks for confirmation first.
+By default, `--clean` only retires jobs that are finished (`終了`, `エラー終了`, `起動エラー`), then closes their Orca terminals. Running children are closed and interrupted only through the explicit "close everything" choice, which asks for confirmation first.
 
-Cleanup also sees jobs left behind by other conversations in this project, which `--list` cannot show. It removes the job directory, and deletes the derived session file **only when the child never wrote to it**; a conversation that was worked on in the tab is kept, and its path is reported.
+Cleanup also sees jobs left behind by other conversations in this project, which `--list` cannot show. It removes the job directory, and deletes the derived session file **only when the child never wrote to it**; a conversation that was worked on in the child terminal is kept, and its path is reported.
 
 ## What is written where
 
@@ -92,7 +104,7 @@ One directory per dispatched session, under the project's session directory:
 <session dir>/orca-dispatch/<parent session id>/<child session id>/
   job.json            startup description: argv, cwd, model, tools, snapshot length
   task.txt            the instruction, as the child's first message
-  receipt.json        Orca tab handle, or the failure reason
+  receipt.json        Orca terminal handle, or the failure reason
   claimed             written by the launcher wrapper before it starts Pi
   task-started        written by the observer once the instruction was accepted
   runner-status.json  launcher wrapper state and exit code
@@ -105,7 +117,8 @@ The derived session file lives beside the parent session file in the project's s
 
 - The child inherits the conversation **as of the dispatch**, plus the model and tool selection at that moment. Later parent turns and later model changes stay in the parent; the child re-applies its model and tool selection once, at startup.
 - Dispatch stays in the same folder. A worktree on another host is refused rather than guessed.
-- On Windows the tab command is passed as a single base64-encoded PowerShell command, so CMD and PowerShell parse it identically. An Orca terminal configured to use WSL as its default shell is not supported.
+- On Windows the terminal command is passed as a single base64-encoded PowerShell command, so CMD and PowerShell parse it identically. An Orca terminal configured to use WSL as its default shell is not supported.
+- Repeated split dispatches subdivide the originating pane again. There is no automatic equalization or tab fallback.
 - Cleanup is manual. Nothing expires on its own; run `/orca-dispatch --clean`.
 
 ## License

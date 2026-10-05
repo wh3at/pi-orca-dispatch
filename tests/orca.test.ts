@@ -44,7 +44,7 @@ test('launch passes literal argv and reveals the created tab', async () => {
   try {
     const title = "案B $(touch SHOULD_NOT_EXIST) ' quote";
     const command = "pi --session '/tmp/session with spaces.jsonl'";
-    assert.deepEqual(await launchTerminal({ ...fixture, worktreeId: 'repo::/workspace', title, command }), {
+    assert.deepEqual(await launchTerminal({ placement: 'tab', ...fixture, worktreeId: 'repo::/workspace', title, command }), {
       handle: 'term-123', surface: 'visible',
     });
     const args = JSON.parse(await readFile(join(fixture.cwd, 'args.json'), 'utf8'));
@@ -58,7 +58,7 @@ test('launch retains success warnings when UI reveal failed', async () => {
     handle: 'term-123', surface: 'background', warning: 'Could not reveal tab'
   } } }));`);
   try {
-    assert.deepEqual(await launchTerminal({ ...fixture, title: 'task', command: 'pi' }), {
+    assert.deepEqual(await launchTerminal({ placement: 'tab', ...fixture, title: 'task', command: 'pi' }), {
       handle: 'term-123', surface: 'background', warning: 'Could not reveal tab',
     });
   } finally { await fixture.clean(); }
@@ -74,7 +74,7 @@ test('preflight rejects unrelated worktree paths before mutation', async () => {
 test('structured selector failures are definite and preserve the runtime message', async () => {
   const fixture = await mockCli(`console.log(JSON.stringify({ ok: false, error: { code: 'selector_not_found', message: 'Workspace was removed' } })); process.exitCode = 1;`);
   try {
-    await assert.rejects(launchTerminal({ ...fixture, title: 'task', command: 'pi' }), (error: unknown) =>
+    await assert.rejects(launchTerminal({ placement: 'tab', ...fixture, title: 'task', command: 'pi' }), (error: unknown) =>
       error instanceof OrcaError && !error.ambiguous && error.message === 'Workspace was removed');
   } finally { await fixture.clean(); }
 });
@@ -86,7 +86,7 @@ test('timeout after creation may have reached the host, and is not retried', asy
     setInterval(() => {}, 1000);
   `);
   try {
-    await assert.rejects(launchTerminal({ ...fixture, title: 'task', command: 'pi', timeoutMs: 300 }), (error: unknown) =>
+    await assert.rejects(launchTerminal({ placement: 'tab', ...fixture, title: 'task', command: 'pi', timeoutMs: 300 }), (error: unknown) =>
       error instanceof OrcaError && error.code === 'orca_timeout' && error.ambiguous);
     assert.equal(await readFile(join(fixture.cwd, 'calls'), 'utf8'), 'called\n');
   } finally { await fixture.clean(); }
@@ -95,7 +95,7 @@ test('timeout after creation may have reached the host, and is not retried', asy
 test('malformed creation response is ambiguous, while malformed preflight is not', async () => {
   const fixture = await mockCli(`console.log('not JSON');`);
   try {
-    await assert.rejects(launchTerminal({ ...fixture, title: 'task', command: 'pi' }), (error: unknown) =>
+    await assert.rejects(launchTerminal({ placement: 'tab', ...fixture, title: 'task', command: 'pi' }), (error: unknown) =>
       error instanceof OrcaError && error.ambiguous && error.code === 'orca_invalid_response');
     await assert.rejects(preflight(fixture), (error: unknown) =>
       error instanceof OrcaError && !error.ambiguous && error.code === 'orca_invalid_response');
@@ -105,7 +105,7 @@ test('malformed creation response is ambiguous, while malformed preflight is not
 test('missing CLI executable is a definite failure', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'pi-orca-cli-'));
   try {
-    await assert.rejects(launchTerminal({ cwd, orcaCommand: join(cwd, 'missing'), title: 'task', command: 'pi' }), (error: unknown) =>
+    await assert.rejects(launchTerminal({ placement: 'tab', cwd, orcaCommand: join(cwd, 'missing'), title: 'task', command: 'pi' }), (error: unknown) =>
       error instanceof OrcaError && error.code === 'ENOENT' && !error.ambiguous);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
@@ -233,5 +233,41 @@ test('an exited tab surfaces the Orca error code for the caller to ignore', asyn
   try {
     await assert.rejects(closeTerminal({ ...fixture, handle: 'term-gone' }), (error: unknown) =>
       error instanceof OrcaError && error.code === 'terminal_exited' && !error.ambiguous);
+  } finally { await fixture.clean(); }
+});
+
+test('split targets the source pane with literal argv and leaves direction and focus to Orca', async () => {
+  const fixture = await mockCli(`
+    require('node:fs').writeFileSync(__dirname + '/args.json', JSON.stringify(process.argv.slice(2)));
+    console.log(JSON.stringify({ ok: true, result: { split: { handle: 'split-child', tabId: 'parent-tab', leafId: 'child-leaf' } } }));
+  `);
+  try {
+    const command = "pi --session '/tmp/quote ; $(touch INJECTED).jsonl'";
+    assert.deepEqual(await launchTerminal({ ...fixture, sourceTerminalHandle: 'source-pane', title: 'task', command }), { handle: 'split-child' });
+    assert.deepEqual(JSON.parse(await readFile(join(fixture.cwd, 'args.json'), 'utf8')), ['terminal', 'split', '--terminal', 'source-pane', '--command', command, '--json']);
+  } finally { await fixture.clean(); }
+});
+
+test('split refuses missing source identity without invoking the CLI', async () => {
+  const fixture = await mockCli(`require('node:fs').writeFileSync(__dirname + '/called', 'yes');`);
+  try {
+    await assert.rejects(launchTerminal({ ...fixture, sourceTerminalHandle: '', title: 'task', command: 'pi' }), (error: unknown) => error instanceof OrcaError && error.code === 'orca_source_missing' && !error.ambiguous);
+    await assert.rejects(readFile(join(fixture.cwd, 'called')), { code: 'ENOENT' });
+  } finally { await fixture.clean(); }
+});
+
+test('split distinguishes definite stale sources from ambiguous creation failures', async () => {
+  for (const [code, ambiguous] of [['terminal_handle_stale', false], ['terminal_exited', false], ['terminal_split_source_not_found', true]] as const) {
+    const fixture = await mockCli(`console.log(JSON.stringify({ ok: false, error: { code: '${code}', message: 'split failed' } }));`);
+    try {
+      await assert.rejects(launchTerminal({ ...fixture, sourceTerminalHandle: 'source', title: 'task', command: 'pi' }), (error: unknown) => error instanceof OrcaError && error.code === code && error.ambiguous === ambiguous);
+    } finally { await fixture.clean(); }
+  }
+});
+
+test('split success without a child handle is ambiguous', async () => {
+  const fixture = await mockCli(`console.log(JSON.stringify({ ok: true, result: { split: { tabId: 'tab' } } }));`);
+  try {
+    await assert.rejects(launchTerminal({ ...fixture, sourceTerminalHandle: 'source', title: 'task', command: 'pi' }), (error: unknown) => error instanceof OrcaError && error.ambiguous);
   } finally { await fixture.clean(); }
 });

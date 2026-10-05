@@ -5,6 +5,7 @@ import type { DispatchInput } from "./src/dispatch.ts";
 import { listJobs, listOrphanJobs, isFinished, removeJob, snapshotUnused, statusOf, resolveSessionDir } from "./src/jobs.ts";
 import type { StoredJob } from "./src/jobs.ts";
 import { closeTerminal, OrcaError, resolveOrcaCommand, switchTerminal } from "./src/orca.ts";
+import { configPath } from "./src/config.ts";
 
 // Structural types keep this extension usable with both official package scopes.
 // Runtime integration uses only the documented extension API.
@@ -70,18 +71,17 @@ export default function orcaDispatch(pi: PiAPI): void {
     const row = rows[labels.indexOf(selected)];
     if (!row) return;
     if (!row.stored.receipt.handle) {
-      ctx.ui.notify(`${row.status.error ?? "タブ情報がありません。Orca のタブ一覧を確認してください。"}\n派生セッション: ${row.stored.job.sessionFile}`, "warning");
+      ctx.ui.notify(`${row.status.error ?? "ターミナル情報がありません。Orca のターミナル一覧を確認してください。"}\n派生セッション: ${row.stored.job.sessionFile}`, "warning");
       return;
     }
     try {
       // The job's own cwd may be gone; the CLI only needs a directory that exists.
       await switchTerminal({ cwd: ctx.cwd, handle: row.stored.receipt.handle });
     } catch (error) {
-      ctx.ui.notify(`タブを開けませんでした。Orca のタブ一覧から開いてください。\n${error instanceof Error ? error.message : String(error)}\n派生セッション: ${row.stored.job.sessionFile}`, "warning");
+      ctx.ui.notify(`ターミナルを開けませんでした。Orca のターミナル一覧から開いてください。\n${error instanceof Error ? error.message : String(error)}\n派生セッション: ${row.stored.job.sessionFile}`, "warning");
     }
   }
 
-  /** Removes finished jobs from the list, closing their Orca tabs. */
   async function cleanJobs(ctx: Context): Promise<void> {
     const sessionDir = resolveSessionDir(ctx.sessionManager.getSessionDir(), ctx.cwd);
     const parentId = ctx.sessionManager.getSessionId();
@@ -99,9 +99,9 @@ export default function orcaDispatch(pi: PiAPI): void {
     const finished = rows.filter((row) => isFinished(row.status.state)).map((row) => row.stored);
     const actions = [
       ...(finished.length
-        ? [{ label: `終了済み ${finished.length} 件を片付ける（タブを閉じる）`, targets: finished, confirm: false }]
+        ? [{ label: `終了済み ${finished.length} 件を片付ける（ターミナルを閉じる）`, targets: finished, confirm: false }]
         : []),
-      { label: `すべて ${all.length} 件を片付ける（実行中のタブも閉じる）`, targets: all, confirm: true },
+      { label: `すべて ${all.length} 件を片付ける（実行中のターミナルも閉じる）`, targets: all, confirm: true },
     ];
     const selected = await ctx.ui.select("Orca の作業を片付ける", actions.map((action) => action.label));
     if (selected === undefined) return;
@@ -110,7 +110,7 @@ export default function orcaDispatch(pi: PiAPI): void {
     if (action.confirm) {
       const proceed = await ctx.ui.confirm(
         "実行中の作業も片付けますか？",
-        `${action.targets.length} 件の Orca タブを閉じるため、実行中の子の作業はそこで中断されます。子タブで一度も使っていない派生セッションだけを削除し、使用済みの会話は残します。`,
+        `${action.targets.length} 件の Orca ターミナルを閉じるため、実行中の子の作業はそこで中断されます。子ターミナルで一度も使っていない派生セッションだけを削除し、使用済みの会話は残します。`,
       );
       if (!proceed) return;
     }
@@ -118,13 +118,13 @@ export default function orcaDispatch(pi: PiAPI): void {
     const keptFiles: string[] = [];
     const failures: string[] = [];
     for (const stored of action.targets) {
-      let tabGone = true;
+      let terminalGone = true;
       if (stored.receipt.handle) {
         try { await closeTerminal({ cwd: ctx.cwd, handle: stored.receipt.handle }); }
         catch (error) {
           const code = error instanceof OrcaError ? error.code : "";
           // A closed or superseded tab is already gone; anything else is worth reporting.
-          tabGone = code === "terminal_exited" || code === "selector_not_found";
+          terminalGone = code === "terminal_exited" || code === "selector_not_found";
         }
       }
       const unused = await snapshotUnused(stored);
@@ -135,23 +135,23 @@ export default function orcaDispatch(pi: PiAPI): void {
       }
       removed.push(stored.job.title);
       if (!unused) keptFiles.push(stored.job.sessionFile);
-      if (!tabGone) failures.push(`${stored.job.title}: タブを閉じられませんでした`);
+      if (!terminalGone) failures.push(`${stored.job.title}: ターミナルを閉じられませんでした`);
     }
     const lines = [`${removed.length} 件を片付けました。`];
     if (keptFiles.length) {
-      lines.push(`子タブで作業済みの派生セッション ${keptFiles.length} 件は残しました:\n${keptFiles.slice(0, 3).join("\n")}${keptFiles.length > 3 ? `\nほか ${keptFiles.length - 3} 件` : ""}`);
+      lines.push(`子ターミナルで作業済みの派生セッション ${keptFiles.length} 件は残しました:\n${keptFiles.slice(0, 3).join("\n")}${keptFiles.length > 3 ? `\nほか ${keptFiles.length - 3} 件` : ""}`);
     }
     if (failures.length) lines.push(`未処理: ${failures.join(" / ")}`);
     ctx.ui.notify(lines.join("\n"), failures.length ? "warning" : "info");
   }
 
   pi.registerCommand("orca-dispatch", {
-    description: "今の会話を保持して Orca の別タブへ指示を渡す。--list で作業一覧、--clean で片付け",
+    description: "今の会話を保持して Orca の別ペインへ指示を渡す。--list で作業一覧、--clean で片付け",
     getArgumentCompletions(prefix) {
       if (!prefix.startsWith("-")) return null;
       return [
         { value: "--list", label: "--list", description: "この会話から送り出した作業を開く" },
-        { value: "--clean", label: "--clean", description: "終了した作業のタブと履歴を片付ける" },
+        { value: "--clean", label: "--clean", description: "終了した作業のターミナルと履歴を片付ける" },
         { value: "--help", label: "--help", description: "使い方" },
       ].filter((item) => item.value.startsWith(prefix));
     },
@@ -162,7 +162,7 @@ export default function orcaDispatch(pi: PiAPI): void {
       }
       if (args.trim() === "--help") {
         const cli = resolveOrcaCommand();
-        ctx.ui.notify(`/orca-dispatch <指示> — 同じフォルダ・モデルで別タブへ送信\n/orca-dispatch — 複数行の指示を入力\n/orca-dispatch --list — この会話から送り出した作業を開く\n/orca-dispatch --clean — 終了した作業のタブと履歴を片付ける\nOrca CLI: ${cli ?? "未検出（Orca アプリの CLI を確認してください）"}`, "info");
+        ctx.ui.notify(`/orca-dispatch <指示> — 同じフォルダ・モデルで別ペインへ送信\n/orca-dispatch — 複数行の指示を入力\n/orca-dispatch --list — この会話から送り出した作業を開く\n/orca-dispatch --clean — 終了した作業のターミナルと履歴を片付ける\n設定: ${configPath()}（placement: split / tab、標準: split）\nOrca CLI: ${cli ?? "未検出（Orca アプリの CLI を確認してください）"}`, "info");
         return;
       }
       if (args.trim() === "--list") {
@@ -182,7 +182,7 @@ export default function orcaDispatch(pi: PiAPI): void {
       const isCurrent = () => generation === epoch && ctx.sessionManager.getSessionId() === parentId;
       let prompt = args;
       try {
-        if (!prompt.trim()) prompt = await ctx.ui.editor("Orca の別タブへ渡す指示", "") ?? "";
+        if (!prompt.trim()) prompt = await ctx.ui.editor("Orca の別ペインへ渡す指示", "") ?? "";
         if (!prompt.trim()) return;
         if (!ctx.isIdle()) {
           ctx.ui.notify("本筋の処理が終わると、会話を引き継いで起動します。", "info");
