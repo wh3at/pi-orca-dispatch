@@ -1,6 +1,6 @@
 {
   "name": "pi-orca-dispatch",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Dispatch the current Pi conversation to a new Orca split pane or opt-in tab that opens with the same folder, model, and tools, leaving the parent session untouched.",
   "type": "module",
   "license": "MIT",
