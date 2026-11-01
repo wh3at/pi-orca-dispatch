@@ -184,15 +184,35 @@ test("observer restores exact active tools and tracks activity without touching 
   assert.equal(status(f.dir, "agent").state, "closed");
 });
 
-test("missing inherited custom tool blocks both initial input and tool calls", (t) => {
-  const f = observe(t, ["read"]);
+test("missing inherited tools time out within one startup budget and never recover automatically", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const available: string[] = [];
+  const f = observe(t, available);
+  writeFileSync(join(f.dir, "task.txt"), "saved instruction");
   f.start();
   f.emit("session_start", { reason: "startup" });
+  t.mock.timers.tick(20_000);
+  available.push("read");
+  const input = f.emit("input");
+  assert.deepEqual(await f.emit("input"), { action: "handled" });
+  t.mock.timers.tick(9_999);
+  assert.deepEqual(f.notifications, []);
   assert.equal(f.calls.length, 0);
-  assert.equal(status(f.dir, "agent").state, "blocked");
-  assert.deepEqual(f.emit("input"), { action: "handled" });
+  assert.equal(existsSync(join(f.dir, "task-started")), false);
   assert.equal(f.emit("tool_call").block, true);
-  assert.match(f.notifications.join(" "), /Required tools are unavailable: edit/);
+  t.mock.timers.tick(1);
+  assert.deepEqual(await input, { action: "handled" });
+  assert.equal(status(f.dir, "agent").state, "blocked");
+  assert.match(status(f.dir, "agent").error, /Timed out after 30 seconds/);
+  assert.match(status(f.dir, "agent").error, /Required tools are unavailable: edit\./);
+  assert.match(f.notifications.join(" "), /Timed out after 30 seconds/);
+  available.push("edit");
+  t.mock.timers.tick(30_000);
+  assert.deepEqual(await f.emit("input"), { action: "handled" });
+  assert.equal(f.emit("tool_call").block, true);
+  assert.equal(f.calls.length, 0);
+  assert.equal(existsSync(join(f.dir, "task-started")), false);
+  assert.equal(readFileSync(join(f.dir, "task.txt"), "utf8"), "saved instruction");
 });
 
 test("tool selection mismatch fails closed even when the API silently ignores a tool", (t) => {
@@ -345,4 +365,129 @@ test("session file comparison is platform aware", () => {
     // Windows folds case before comparing; POSIX does not.
     assert.equal(samePath(file, file.toUpperCase()), process.platform === "win32");
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("delayed inherited tools register after later startup hooks before the initial input is accepted", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const available = ["read"];
+  const f = observe(t, available);
+  f.job.activeTools = ["read", "mcp__paper", "custom"];
+  f.save();
+  f.start();
+  await f.emit("session_start", { reason: "startup" });
+  assert.deepEqual(f.notifications, []);
+  assert.equal(f.emit("tool_call").block, true);
+  setTimeout(() => available.push("mcp__paper", "custom"), 200);
+  let downstreamInputs = 0;
+  const input = (async () => {
+    const result = await f.emit("input");
+    if (result?.action !== "handled") downstreamInputs++;
+    return result;
+  })();
+  assert.equal(existsSync(join(f.dir, "task-started")), false);
+  t.mock.timers.tick(200);
+  t.mock.timers.tick(100);
+  assert.equal(await input, undefined);
+  assert.equal(downstreamInputs, 1);
+  assert.deepEqual(f.api.getActiveTools(), ["read", "mcp__paper", "custom"]);
+  assert.equal(existsSync(join(f.dir, "task-started")), true);
+  const marker = readFileSync(join(f.dir, "task-started"), "utf8");
+  await f.emit("input");
+  assert.equal(readFileSync(join(f.dir, "task-started"), "utf8"), marker);
+  assert.equal(f.emit("tool_call"), undefined);
+  assert.deepEqual(f.notifications, []);
+});
+
+for (const reason of ["new", "resume", "reload", "shutdown"]) {
+  test(`${reason} cancels registration waiting without mutating the replacement session`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const available = ["read"];
+    const f = observe(t, available);
+    f.start();
+    f.emit("session_start", { reason: "startup" });
+    const input = f.emit("input");
+    f.emit("session_shutdown", { reason });
+    const saved = readFileSync(join(f.dir, "agent-status.json"), "utf8");
+    if (reason !== "shutdown") {
+      if (reason === "reload") f.start();
+      f.ctx.sessionManager.getSessionFile = () => join(f.dir, "replacement.jsonl");
+      f.emit("session_start", { reason });
+      assert.equal(await f.emit("input"), undefined);
+    }
+    available.push("edit");
+    t.mock.timers.tick(30_000);
+    assert.deepEqual(await input, { action: "handled" });
+    assert.equal(f.calls.length, 0);
+    assert.equal(existsSync(join(f.dir, "task-started")), false);
+    assert.equal(readFileSync(join(f.dir, "agent-status.json"), "utf8"), saved);
+    assert.deepEqual(f.notifications, []);
+  });
+}
+
+test("tools observed before the deadline allow startup without consuming a second input", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const available = ["read"];
+  const f = observe(t, available);
+  f.start();
+  f.emit("session_start", { reason: "startup" });
+  const input = f.emit("input");
+  t.mock.timers.tick(29_899);
+  available.push("edit");
+  t.mock.timers.tick(100);
+  assert.equal(await input, undefined);
+  assert.equal(existsSync(join(f.dir, "task-started")), true);
+  t.mock.timers.tick(1);
+  assert.equal(f.emit("tool_call"), undefined);
+  assert.deepEqual(f.notifications, []);
+});
+
+test("a tool registry failure at initial input still fails closed", (t) => {
+  const f = observe(t);
+  f.start();
+  f.emit("session_start", { reason: "startup" });
+  f.api.getAllTools = () => { throw new Error("registry unavailable"); };
+  assert.deepEqual(f.emit("input"), { action: "handled" });
+  assert.equal(f.emit("tool_call").block, true);
+  assert.equal(status(f.dir, "agent").state, "blocked");
+  assert.match(status(f.dir, "agent").error, /registry unavailable/);
+  assert.equal(existsSync(join(f.dir, "task-started")), false);
+});
+
+for (const mismatch of ["model", "tool selection"]) {
+  test(`delayed tool registration still rejects a ${mismatch} mismatch`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const available = ["read"];
+    const f = observe(t, available);
+    Object.assign(f.job, { model: { ...f.ctx.model } });
+    f.save();
+    f.start();
+    f.emit("session_start", { reason: "startup" });
+    const input = f.emit("input");
+    if (mismatch === "model") f.ctx.model = { provider: "wrong", id: "wrong" };
+    else f.api.getActiveTools = () => ["read", "edit", "bash"];
+    available.push("edit");
+    t.mock.timers.tick(100);
+    assert.deepEqual(await input, { action: "handled" });
+    assert.equal(status(f.dir, "agent").state, "blocked");
+    assert.match(status(f.dir, "agent").error, mismatch === "model" ? /requested model/ : /tool selection/);
+    assert.equal(existsSync(join(f.dir, "task-started")), false);
+    assert.equal(f.emit("tool_call").block, true);
+  });
+}
+
+test("session replacement invalidates even a registration wait that has already resolved", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const available = ["read"];
+  const f = observe(t, available);
+  f.start();
+  f.emit("session_start", { reason: "startup" });
+  const input = f.emit("input");
+  available.push("edit");
+  t.mock.timers.tick(100);
+  f.emit("session_shutdown", { reason: "reload" });
+  const saved = readFileSync(join(f.dir, "agent-status.json"), "utf8");
+  assert.deepEqual(await input, { action: "handled" });
+  assert.equal(f.calls.length, 0);
+  assert.equal(existsSync(join(f.dir, "task-started")), false);
+  assert.equal(readFileSync(join(f.dir, "agent-status.json"), "utf8"), saved);
 });

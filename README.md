@@ -29,7 +29,7 @@ The Orca CLI is located without any extension-specific configuration:
 
 ### Pi peer dependencies
 
-This package has no runtime dependencies and imports no Pi packages. It uses documented extension APIs only (`registerCommand`, the `session_start` and `session_shutdown` events, the `input` and `tool_call` results, `ui.editor`/`ui.select`/`ui.confirm`, and the read-only `ctx.sessionManager` accessors), so no peer dependencies are declared. Verified against Pi 0.85.1.
+This package has no runtime dependencies and imports no Pi packages. It uses documented extension APIs only (`registerCommand`, the `session_start` and `session_shutdown` events, the `input` and `tool_call` results, `ui.editor`/`ui.select`/`ui.confirm`, and the read-only `ctx.sessionManager` accessors), so no peer dependencies are declared. Previously verified against Pi 0.85.1. The asynchronous tool-registration fix was additionally checked with Pi 1.4.0's actual extension event runner, not an end-to-end Orca/MCP session; see [validation scope](docs/issue-4-validation.md).
 
 ## Install from source
 
@@ -112,6 +112,12 @@ One directory per dispatched session, under the project's session directory:
 ```
 
 The derived session file lives beside the parent session file in the project's session directory. The parent's model, tools, and messages are never changed.
+
+### Dynamic tool startup
+
+The child allows up to 30 seconds from observer startup for every inherited active tool to register, without delaying later startup hooks. Its initial input waits for registration before the exact model and tool selection are validated. Already registered tools introduce no intentional delay.
+
+If registration times out, startup is blocked with the missing tool names. The instruction stays in `task.txt`; later registration does not retry or execute it. Session replacement, reload, and shutdown cancel any old wait. After the initial input is accepted, reload/resume preserve the user's subsequent model and tool choices.
 
 ## Limits
 
