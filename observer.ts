@@ -123,15 +123,17 @@ export default function observer(pi: ObserverAPI): void {
         }
         try {
           const remaining = deadline - Date.now();
+          if (remaining >= 0) {
+            missing = missingTools();
+            if (!missing.length) {
+              finish(true);
+              return;
+            }
+          }
           if (remaining <= 0) {
             block(ctx, new Error(`Timed out after 30 seconds waiting for tool registration. Required tools are unavailable: ${missing.join(", ")}.`));
             firstInputPending = false;
             finish(false);
-            return;
-          }
-          missing = missingTools();
-          if (!missing.length) {
-            finish(true);
             return;
           }
           timer = setTimeout(check, Math.min(100, remaining));

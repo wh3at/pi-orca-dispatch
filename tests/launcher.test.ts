@@ -398,14 +398,19 @@ test("delayed inherited tools register after later startup hooks before the init
   assert.deepEqual(f.notifications, []);
 });
 
+function pendingRegistration(t: TestContext) {
+  const available = ["read"];
+  const f = observe(t, available);
+  f.start();
+  f.emit("session_start", { reason: "startup" });
+  return { ...f, available, input: f.emit("input") };
+}
+
 for (const reason of ["new", "resume", "reload", "shutdown"]) {
   test(`${reason} cancels registration waiting without mutating the replacement session`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-    const available = ["read"];
-    const f = observe(t, available);
-    f.start();
-    f.emit("session_start", { reason: "startup" });
-    const input = f.emit("input");
+    const f = pendingRegistration(t);
+    const { available, input } = f;
     f.emit("session_shutdown", { reason });
     const saved = readFileSync(join(f.dir, "agent-status.json"), "utf8");
     if (reason !== "shutdown") {
@@ -424,16 +429,13 @@ for (const reason of ["new", "resume", "reload", "shutdown"]) {
   });
 }
 
-test("tools observed before the deadline allow startup without consuming a second input", async (t) => {
+test("tools registered during the final polling interval are accepted at the deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-  const available = ["read"];
-  const f = observe(t, available);
-  f.start();
-  f.emit("session_start", { reason: "startup" });
-  const input = f.emit("input");
-  t.mock.timers.tick(29_899);
+  const f = pendingRegistration(t);
+  const { available, input } = f;
+  t.mock.timers.tick(29_950);
   available.push("edit");
-  t.mock.timers.tick(100);
+  t.mock.timers.tick(50);
   assert.equal(await input, undefined);
   assert.equal(existsSync(join(f.dir, "task-started")), true);
   t.mock.timers.tick(1);
@@ -477,11 +479,8 @@ for (const mismatch of ["model", "tool selection"]) {
 
 test("session replacement invalidates even a registration wait that has already resolved", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-  const available = ["read"];
-  const f = observe(t, available);
-  f.start();
-  f.emit("session_start", { reason: "startup" });
-  const input = f.emit("input");
+  const f = pendingRegistration(t);
+  const { available, input } = f;
   available.push("edit");
   t.mock.timers.tick(100);
   f.emit("session_shutdown", { reason: "reload" });
@@ -494,11 +493,8 @@ test("session replacement invalidates even a registration wait that has already 
 
 test("an overdue registration callback cannot accept tools registered after the deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
-  const available = ["read"];
-  const f = observe(t, available);
-  f.start();
-  f.emit("session_start", { reason: "startup" });
-  const input = f.emit("input");
+  const f = pendingRegistration(t);
+  const { available, input } = f;
   t.mock.timers.setTime(31_000);
   available.push("edit");
   t.mock.timers.tick(100);
