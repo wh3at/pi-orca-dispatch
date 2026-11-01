@@ -44,6 +44,12 @@ export default function observer(pi: ObserverAPI): void {
   let verified = false;
   let detached = false;
   let firstInputPending = false;
+  let generation = 0;
+  let deadline = 0;
+  let registration: Promise<boolean> | undefined;
+  let cancelRegistration: (() => void) | undefined;
+  let checkRegistration: (() => void) | undefined;
+  let acceptingInput = false;
 
   try {
     if (!isAbsolute(jobPath)) throw new Error("Dispatch job path must be absolute.");
@@ -92,14 +98,63 @@ export default function observer(pi: ObserverAPI): void {
     ctx.ui.notify(`Orca dispatch did not start: ${blockedReason} The task remains in task.txt beside job.json.`, "error");
   }
 
+  function missingTools(): string[] {
+    const available = new Set(pi.getAllTools().map((tool) => tool.name));
+    return job!.activeTools.filter((name) => !available.has(name));
+  }
+
+  function waitForTools(ctx: Context): Promise<boolean> {
+    const owner = generation;
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout>;
+      let missing = [...job!.activeTools];
+      function finish(ready: boolean): void {
+        clearTimeout(timer);
+        cancelRegistration = undefined;
+        checkRegistration = undefined;
+        resolve(ready);
+      }
+      cancelRegistration = () => finish(false);
+      function check(): void {
+        clearTimeout(timer);
+        if (generation !== owner || detached || !matches(ctx)) {
+          finish(false);
+          return;
+        }
+        try {
+          const remaining = deadline - Date.now();
+          if (remaining >= 0) {
+            missing = missingTools();
+            if (!missing.length) {
+              finish(true);
+              return;
+            }
+          }
+          if (remaining <= 0) {
+            block(ctx, new Error(`Timed out after 30 seconds waiting for tool registration. Required tools are unavailable: ${missing.join(", ")}.`));
+            firstInputPending = false;
+            finish(false);
+            return;
+          }
+          timer = setTimeout(check, Math.min(100, remaining));
+        } catch (error) {
+          block(ctx, error);
+          firstInputPending = false;
+          finish(false);
+        }
+      }
+      checkRegistration = check;
+      check();
+    });
+  }
+
   function restoreConfiguration(ctx: Context): void {
     if (job!.model && (ctx.model?.provider !== job!.model.provider || ctx.model?.id !== job!.model.id)) {
       const requested = `${job!.model.provider}/${job!.model.id}`;
       const actual = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "no model";
       throw new Error(`The requested model ${requested} was not restored (opened ${actual}).`);
     }
-    const available = new Set(pi.getAllTools().map((tool) => tool.name));
-    const missing = job!.activeTools.filter((name) => !available.has(name));
+    const missing = missingTools();
     if (missing.length) throw new Error(`Required tools are unavailable: ${missing.join(", ")}.`);
     pi.setActiveTools([...job!.activeTools]);
     if (pi.getActiveTools) {
@@ -145,6 +200,11 @@ export default function observer(pi: ObserverAPI): void {
   }
 
   pi.on("session_start", (event, ctx) => {
+    cancelRegistration?.();
+    registration = undefined;
+    generation++;
+    deadline = Date.now() + 30_000;
+    acceptingInput = false;
     verified = false;
     detached = false;
     firstInputPending = true;
@@ -168,6 +228,10 @@ export default function observer(pi: ObserverAPI): void {
         status(ctx, "idle");
         return;
       }
+      if (missingTools().length) {
+        registration = waitForTools(ctx);
+        return;
+      }
       restoreConfiguration(ctx);
       verified = true;
       status(ctx, "ready");
@@ -176,25 +240,38 @@ export default function observer(pi: ObserverAPI): void {
     }
   });
 
-  // Pi emits `input` for its initial @task CLI message before starting the LLM.
-  // Returning handled keeps startup failures from silently running the task
-  // with a different set of tools. This also protects older pi versions where
-  // throwing from session_start only logs the extension error.
+  function acceptInput(ctx: Context, owner: number): { action: "handled" } | undefined {
+    if (owner !== generation || detached || !matches(ctx)) return { action: "handled" };
+    firstInputPending = false;
+    acceptingInput = false;
+    try {
+      restoreConfiguration(ctx);
+      markTaskStarted();
+      verified = true;
+      status(ctx, "ready");
+    } catch (error) {
+      block(ctx, error);
+      return { action: "handled" };
+    }
+  }
+
   pi.on("input", (_event, ctx) => {
     if (detached) return;
+    if (acceptingInput) return { action: "handled" };
     if (firstInputPending && matches(ctx)) {
-      firstInputPending = false;
-      // Discovered extensions run their session_start hooks after CLI -e
-      // extensions. Restore once more after all startup hooks have completed.
-      // Later user inputs retain their intentional model/tool changes.
+      acceptingInput = true;
+      const owner = generation;
       try {
-        restoreConfiguration(ctx);
-        // This records input acceptance, not implementation success. Pi may
-        // still encounter an auth error or another extension may handle input.
-        markTaskStarted();
-        verified = true;
-        status(ctx, "ready");
+        if (registration || missingTools().length) {
+          verified = false;
+          registration ??= waitForTools(ctx);
+          checkRegistration?.();
+          return registration.then((ready) => ready ? acceptInput(ctx, owner) : { action: "handled" });
+        }
+        return acceptInput(ctx, owner);
       } catch (error) {
+        firstInputPending = false;
+        acceptingInput = false;
         block(ctx, error);
         return { action: "handled" };
       }
@@ -216,6 +293,8 @@ export default function observer(pi: ObserverAPI): void {
     if (verified) status(ctx, "idle");
   });
   pi.on("session_shutdown", (_event, ctx) => {
+    generation++;
+    cancelRegistration?.();
     status(ctx, "closed");
     verified = false;
     detached = true;
