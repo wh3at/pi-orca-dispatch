@@ -48,6 +48,7 @@ export default function observer(pi: ObserverAPI): void {
   let deadline = 0;
   let registration: Promise<boolean> | undefined;
   let cancelRegistration: (() => void) | undefined;
+  let checkRegistration: (() => void) | undefined;
   let acceptingInput = false;
 
   try {
@@ -106,28 +107,31 @@ export default function observer(pi: ObserverAPI): void {
     const owner = generation;
     return new Promise((resolve) => {
       let timer: ReturnType<typeof setTimeout>;
+      let missing = [...job!.activeTools];
       function finish(ready: boolean): void {
         clearTimeout(timer);
         cancelRegistration = undefined;
+        checkRegistration = undefined;
         resolve(ready);
       }
       cancelRegistration = () => finish(false);
       function check(): void {
+        clearTimeout(timer);
         if (generation !== owner || detached || !matches(ctx)) {
           finish(false);
           return;
         }
         try {
-          const missing = missingTools();
-          if (!missing.length) {
-            finish(true);
-            return;
-          }
           const remaining = deadline - Date.now();
           if (remaining <= 0) {
             block(ctx, new Error(`Timed out after 30 seconds waiting for tool registration. Required tools are unavailable: ${missing.join(", ")}.`));
             firstInputPending = false;
             finish(false);
+            return;
+          }
+          missing = missingTools();
+          if (!missing.length) {
+            finish(true);
             return;
           }
           timer = setTimeout(check, Math.min(100, remaining));
@@ -137,6 +141,7 @@ export default function observer(pi: ObserverAPI): void {
           finish(false);
         }
       }
+      checkRegistration = check;
       check();
     });
   }
@@ -258,6 +263,7 @@ export default function observer(pi: ObserverAPI): void {
         if (registration || missingTools().length) {
           verified = false;
           registration ??= waitForTools(ctx);
+          checkRegistration?.();
           return registration.then((ready) => ready ? acceptInput(ctx, owner) : { action: "handled" });
         }
         return acceptInput(ctx, owner);

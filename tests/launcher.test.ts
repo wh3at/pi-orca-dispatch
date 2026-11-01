@@ -491,3 +491,43 @@ test("session replacement invalidates even a registration wait that has already 
   assert.equal(existsSync(join(f.dir, "task-started")), false);
   assert.equal(readFileSync(join(f.dir, "agent-status.json"), "utf8"), saved);
 });
+
+test("an overdue registration callback cannot accept tools registered after the deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const available = ["read"];
+  const f = observe(t, available);
+  f.start();
+  f.emit("session_start", { reason: "startup" });
+  const input = f.emit("input");
+  t.mock.timers.setTime(31_000);
+  available.push("edit");
+  t.mock.timers.tick(100);
+  assert.deepEqual(await input, { action: "handled" });
+  assert.equal(status(f.dir, "agent").state, "blocked");
+  assert.match(status(f.dir, "agent").error, /Timed out after 30 seconds/);
+  assert.match(status(f.dir, "agent").error, /edit/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(existsSync(join(f.dir, "task-started")), false);
+});
+
+test("tools registered by a later startup hook need no polling delay at initial input", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const available = ["read"];
+  const f = observe(t, available);
+  f.start();
+  await f.emit("session_start", { reason: "startup" });
+  available.push("edit");
+  let accepted = false;
+  const input = Promise.resolve(f.emit("input")).then((result) => {
+    accepted = result?.action !== "handled";
+    return result;
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(accepted, true);
+  assert.equal(await input, undefined);
+  assert.equal(existsSync(join(f.dir, "task-started")), true);
+  assert.deepEqual(f.api.getActiveTools(), ["read", "edit"]);
+  t.mock.timers.tick(30_000);
+  assert.deepEqual(f.notifications, []);
+});
