@@ -29,7 +29,7 @@ The Orca CLI is located without any extension-specific configuration:
 
 ### Pi peer dependencies
 
-This package has no runtime dependencies and imports no Pi packages. It uses documented extension APIs only (`registerCommand`, the `session_start` and `session_shutdown` events, the `input` and `tool_call` results, `ui.editor`/`ui.select`/`ui.confirm`, and the read-only `ctx.sessionManager` accessors), so no peer dependencies are declared. Previously verified against Pi 0.85.1. The asynchronous tool-registration fix was additionally checked with Pi 1.4.0's actual extension event runner, not an end-to-end Orca/MCP session; see [validation scope](docs/issue-4-validation.md).
+This package has no runtime dependencies and imports no Pi packages. It uses documented extension APIs only (`registerCommand`, the `session_start` and `session_shutdown` events, the `input` and `tool_call` results, `ui.editor`/`ui.select`/`ui.confirm`, and the read-only `ctx.sessionManager` accessors), so no peer dependencies are declared.
 
 ## Install from source
 

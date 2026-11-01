@@ -11,6 +11,7 @@ import { OrcaError, type LaunchTerminalOptions } from "../src/orca.ts";
 import { listJobs, listOrphanJobs, removeJob, snapshotUnused, statusOf } from "../src/jobs.ts";
 import { resolveSessionDir } from "../src/jobs.ts";
 import { inheritResourceArgs, launchShellCommand, taskTitle } from "../src/launch-plan.ts";
+import type { SnapshotEntry } from "../src/session.ts";
 
 const exec = promisify(execFile);
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,19 +23,19 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const sessionDir = join(root, "sessions");
   await mkdir(cwd); await mkdir(sessionDir);
   const header = { type: "session", version: 3, id: "parent-1", timestamp: "2026-09-15T00:00:00Z", cwd };
-  const entries = [
+  const entries: SnapshotEntry[] = [
     { type: "message", id: "a", parentId: null, timestamp: header.timestamp, message: { role: "user", content: "提案して" } },
     { type: "message", id: "b", parentId: "a", timestamp: header.timestamp, message: { role: "assistant", content: [{ type: "text", text: "案Aと案B" }] } },
   ];
   const parent = join(sessionDir, "parent.jsonl");
-  const original = [header, ...entries, { type: "message", id: "unrelated", parentId: "a", message: { role: "user", content: "別の枝" } }].map(JSON.stringify).join("\n") + "\n";
+  const original = [header, ...entries, { type: "message", id: "unrelated", parentId: "a", message: { role: "user", content: "別の枝" } }].map((entry) => JSON.stringify(entry)).join("\n") + "\n";
   await writeFile(parent, original);
   const manager = {
     getHeader: () => header, getBranch: () => entries,
     getSessionId: () => header.id, getSessionFile: () => parent,
     getLeafId: () => entries.at(-1)?.id ?? null,
   };
-  const input = { manager, sessionDir, cwd, configPath: join(root, "orca-dispatch.json"), sourceTerminalHandle: "source-pane", model: { provider: "provider", id: "exact/model" }, thinkingLevel: "medium", activeTools: ["read", "bash", "custom_tool"], packageDir, launchCommand: { command: [process.execPath, join(root, "fake-pi.mjs")], resourceArgs: [] } };
+  const input = { manager, sessionDir, cwd, configPath: join(root, "orca-dispatch.json"), sourceTerminalHandle: "source-pane", model: { provider: "provider", id: "exact/model" }, thinkingLevel: "medium", activeTools: ["read", "bash", "custom_tool"], packageDir, launchCommand: { command: [process.execPath, join(root, "fake-pi.mjs")], resourceArgs: [] as string[] } };
   return { root, cwd, sessionDir, header, entries, parent, original, manager, input };
 }
 
