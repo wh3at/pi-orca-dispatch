@@ -113,12 +113,6 @@ One directory per dispatched session, under the project's session directory:
 
 The derived session file lives beside the parent session file in the project's session directory. The parent's model, tools, and messages are never changed.
 
-### Dynamic tool startup
-
-The child allows up to 30 seconds from observer startup for every inherited active tool to register, without delaying later startup hooks. Its initial input waits for registration before the exact model and tool selection are validated. Already registered tools introduce no intentional delay.
-
-If registration times out, startup is blocked with the missing tool names. The instruction stays in `task.txt`; later registration does not retry or execute it. Session replacement, reload, and shutdown cancel any old wait. After the initial input is accepted, reload/resume preserve the user's subsequent model and tool choices.
-
 ## Limits
 
 - The child inherits the conversation **as of the dispatch**, plus the model and tool selection at that moment. Later parent turns and later model changes stay in the parent; the child re-applies its model and tool selection once, at startup.
