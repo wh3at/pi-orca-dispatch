@@ -16,7 +16,7 @@ Restart Pi after installation.
 
 - **Orca** running on the same machine, with its CLI registered. SSH workspaces and paired remote runtimes are refused, because the new terminal has to read this machine's session files.
 - **Pi started inside an Orca terminal pane in a managed worktree.** Split mode requires `ORCA_TERMINAL_HANDLE` to identify the source pane; it never falls back to the active pane or a new tab. Dispatch stops when the current directory is outside the worktree.
-- **Node.js 22.19.0 or later**, which is also Pi's own requirement.
+- **Node.js 22.19.0 or later**, including when Pi itself is a standalone binary. Standalone Pi needs an external Node.js on `PATH` to run the launcher.
 
 The Orca CLI is located without any extension-specific configuration:
 
@@ -26,6 +26,8 @@ The Orca CLI is located without any extension-specific configuration:
 | macOS / Windows | `orca` | Windows resolves `.exe`, `.cmd`, and `.ps1` entries through `PATHEXT`, and starts batch shims through `cmd.exe`. |
 
 `ORCA_CLI_COMMAND` overrides the lookup, and `ORCA_DEV_REPO_ROOT` selects `orca-dev` for Orca development checkouts.
+
+Both Node.js-installed Pi and standalone Pi are supported. The child always uses the parent's Pi installation: Node.js plus the same entrypoint for Node.js-installed Pi, or the same executable directly for standalone Pi. The launcher runs separately under a verified Node.js executable. Missing or outdated Node.js and unrecognized Pi launch forms stop dispatch before creating session files, jobs, or panes.
 
 ### Pi peer dependencies
 
@@ -120,6 +122,16 @@ The derived session file lives beside the parent session file in the project's s
 - On Windows the terminal command is passed as a single base64-encoded PowerShell command, so CMD and PowerShell parse it identically. An Orca terminal configured to use WSL as its default shell is not supported.
 - Repeated split dispatches subdivide the originating pane again. There is no automatic equalization or tab fallback.
 - Cleanup is manual. Nothing expires on its own; run `/orca-dispatch --clean`.
+
+## Tests
+
+Run `npm test` and `npm run check` for the regular suite. The standalone process integration test is opt-in and requires Linux x64, util-linux `script`, and the **Pi 1.5.0 Linux x64 standalone binary** from [the release](https://github.com/earendil-works/pi/releases/tag/v1.5.0):
+
+```bash
+PI_TEST_STANDALONE=/absolute/path/to/pi npm run test:standalone
+```
+
+The test pins the binary's SHA-256 to `61a84400938da652ed69aac9c1ad2ca23af3c9bd8cc2f46ce571ed84ae6a35e5` and checks its version. It resolves a launch plan inside that real binary, executes the launcher and child TUI in a pseudo-terminal, checks the accepted instruction and inherited session/settings, tests nested dispatch and duplicate-launch rejection, and exits before any model request. Orca terminal creation is substituted; this test does not verify Orca's pane UI.
 
 ## License
 
