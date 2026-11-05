@@ -26,7 +26,6 @@ The Orca CLI is located without any extension-specific configuration:
 | macOS / Windows | `orca` | Windows resolves `.exe`, `.cmd`, and `.ps1` entries through `PATHEXT`, and starts batch shims through `cmd.exe`. |
 
 `ORCA_CLI_COMMAND` overrides the lookup, and `ORCA_DEV_REPO_ROOT` selects `orca-dev` for Orca development checkouts.
-
 ### Pi peer dependencies
 
 This package has no runtime dependencies and imports no Pi packages. It uses documented extension APIs only (`registerCommand`, the `session_start` and `session_shutdown` events, the `input` and `tool_call` results, `ui.editor`/`ui.select`/`ui.confirm`, and the read-only `ctx.sessionManager` accessors), so no peer dependencies are declared.
@@ -120,6 +119,14 @@ The derived session file lives beside the parent session file in the project's s
 - On Windows the terminal command is passed as a single base64-encoded PowerShell command, so CMD and PowerShell parse it identically. An Orca terminal configured to use WSL as its default shell is not supported.
 - Repeated split dispatches subdivide the originating pane again. There is no automatic equalization or tab fallback.
 - Cleanup is manual. Nothing expires on its own; run `/orca-dispatch --clean`.
+
+## Tests
+
+Run `npm test` and `npm run check` for the regular suite. The standalone process integration test is opt-in and requires Linux x64, util-linux `script`, and the **Pi 1.5.0 Linux x64 standalone binary** from [the release](https://github.com/earendil-works/pi/releases/tag/v1.5.0):
+
+```bash
+PI_TEST_STANDALONE=/absolute/path/to/pi npm run test:standalone
+```
 
 ## License
 

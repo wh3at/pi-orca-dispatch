@@ -1,7 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { findExecutable } from "./orca.ts";
 
-export interface LaunchCommand { command: string[]; resourceArgs: string[] }
+export interface LaunchCommand { launcherNode: string; command: string[]; resourceArgs: string[] }
 
 // Keep configuration inputs, never the parent's prompt, --resume, --session,
 // credentials, or print/RPC mode. The child must get its own interactive session.
@@ -30,16 +32,42 @@ export function inheritResourceArgs(argv: readonly string[]): string[] {
   return result;
 }
 
+function launcherNode(executable: string | undefined): string {
+  const message = "ランチャーには外部の Node.js 22.19.0 以上が必要です。Node.js のインストールと PATH を確認してください。";
+  if (!executable) throw new Error(message);
+  try {
+    const result = JSON.parse(execFileSync(resolve(executable), ["-p",
+      "JSON.stringify({release:process.release.name,version:process.versions.node,bun:Boolean(process.versions.bun),executable:process.execPath})",
+    ], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] }));
+    const version = /^(\d+)\.(\d+)\.(\d+)$/u.exec(result.version);
+    if (result.release !== "node" || result.bun || !version || !isAbsolute(result.executable)
+      || Number(version[1]) < 22 || (Number(version[1]) === 22 && Number(version[2]) < 19)) {
+      throw new Error(message);
+    }
+    return result.executable;
+  } catch (error) {
+    throw new Error(message, { cause: error });
+  }
+}
+
 export function currentPiCommand(
   argv: readonly string[] = process.argv,
   executable: string = process.execPath,
+  versions: { node?: string; bun?: string } = process.versions,
+  env: NodeJS.ProcessEnv = process.env,
 ): LaunchCommand {
   const entrypoint = argv[1];
-  if (!entrypoint || !existsSync(entrypoint)) {
+  const embedded = Boolean(entrypoint && /^(?:\/\$bunfs\/|[A-Za-z]:\\~BUN\\)/u.test(entrypoint));
+  const standalone = Boolean(versions.bun && embedded);
+  if ((!standalone && versions.bun) || (!versions.bun && (!versions.node || embedded))) {
+    throw new Error("Piの起動形態を判定できません。Node.js経由版または単体実行版を使用してください。");
+  }
+  if (!standalone && (!entrypoint || !existsSync(entrypoint))) {
     throw new Error("Piの起動パスが見つかりません。このPiを再起動してください。");
   }
   return {
-    command: [executable, isAbsolute(entrypoint) ? entrypoint : resolve(entrypoint)],
+    launcherNode: launcherNode(standalone ? findExecutable(process.platform === "win32" ? "node.exe" : "node", env) : executable),
+    command: standalone ? [executable] : [executable, isAbsolute(entrypoint!) ? entrypoint! : resolve(entrypoint!)],
     resourceArgs: inheritResourceArgs(argv.slice(2)),
   };
 }

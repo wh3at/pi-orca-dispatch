@@ -113,7 +113,7 @@ export async function dispatchTask(
       placement,
       sourceTerminalHandle,
       title,
-      command: launchShellCommand(process.execPath, join(input.packageDir, "bin", "launch.mjs"), jobPath),
+      command: launchShellCommand(launch.launcherNode, join(input.packageDir, "bin", "launch.mjs"), jobPath),
       orcaCommand: input.orcaCommand,
     });
     stored.receipt = { handle: terminal.handle, ...(terminal.warning ? { warning: terminal.warning } : {}) };

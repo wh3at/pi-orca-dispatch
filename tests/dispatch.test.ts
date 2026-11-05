@@ -10,7 +10,7 @@ import { dispatchTask, DispatchError } from "../src/dispatch.ts";
 import { OrcaError, type LaunchTerminalOptions } from "../src/orca.ts";
 import { listJobs, listOrphanJobs, removeJob, snapshotUnused, statusOf } from "../src/jobs.ts";
 import { resolveSessionDir } from "../src/jobs.ts";
-import { inheritResourceArgs, launchShellCommand, taskTitle } from "../src/launch-plan.ts";
+import { currentPiCommand, inheritResourceArgs, launchShellCommand, taskTitle } from "../src/launch-plan.ts";
 import type { SnapshotEntry } from "../src/session.ts";
 
 const exec = promisify(execFile);
@@ -35,7 +35,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
     getSessionId: () => header.id, getSessionFile: () => parent,
     getLeafId: () => entries.at(-1)?.id ?? null,
   };
-  const input = { manager, sessionDir, cwd, configPath: join(root, "orca-dispatch.json"), sourceTerminalHandle: "source-pane", model: { provider: "provider", id: "exact/model" }, thinkingLevel: "medium", activeTools: ["read", "bash", "custom_tool"], packageDir, launchCommand: { command: [process.execPath, join(root, "fake-pi.mjs")], resourceArgs: [] as string[] } };
+  const input = { manager, sessionDir, cwd, configPath: join(root, "orca-dispatch.json"), sourceTerminalHandle: "source-pane", model: { provider: "provider", id: "exact/model" }, thinkingLevel: "medium", activeTools: ["read", "bash", "custom_tool"], packageDir, launchCommand: { launcherNode: process.execPath, command: [process.execPath, join(root, "fake-pi.mjs")], resourceArgs: [] as string[] } };
   return { root, cwd, sessionDir, header, entries, parent, original, manager, input };
 }
 
@@ -302,4 +302,23 @@ test("invalid configuration and missing source pane leave sessions untouched", a
   await assert.rejects(dispatchTask("task", f.input, deps), /placement/u);
   assert.deepEqual(await readdir(f.sessionDir), ["parent.jsonl"]);
   assert.equal(await readFile(f.parent, 'utf8'), f.original);
+});
+
+test("launch resolution errors stop before preflight, derived sessions, jobs or panes", async (t) => {
+  const f = await fixture(t);
+  const oldNode = join(f.root, "old-node");
+  await writeFile(oldNode, '#!/bin/sh\nprintf \'%s\' \'{"release":"node","version":"22.18.0","bun":false,"executable":"/old-node"}\'\n', { mode: 0o700 });
+  const cases = [
+    () => currentPiCommand(["bun", "/$bunfs/root/pi"], "/pi", { bun: "1.4.4" }, { PATH: "" }),
+    () => currentPiCommand(["unknown", import.meta.filename], "/unknown", {}),
+    () => currentPiCommand(["node", import.meta.filename], oldNode, { node: "22.18.0" }),
+  ];
+  for (const launch of cases) {
+    await assert.rejects(dispatchTask("task", { ...f.input, get launchCommand() { return launch(); } }, {
+      preflight: async () => { throw new Error("must not preflight"); },
+      launchTerminal: async () => { throw new Error("must not launch"); },
+    }), /Node.js.*22\.19\.0|起動形態/u);
+    assert.deepEqual(await readdir(f.sessionDir), ["parent.jsonl"]);
+    assert.equal(await readFile(f.parent, "utf8"), f.original);
+  }
 });

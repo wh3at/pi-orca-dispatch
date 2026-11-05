@@ -12,5 +12,5 @@
   "engines": { "node": ">=22.19.0" },
   "pi": { "extensions": ["./index.ts"] },
   "files": ["index.ts", "observer.ts", "src/", "bin/", "README.md", "LICENSE"],
-  "scripts": { "test": "node --experimental-strip-types --test tests/*.test.ts", "check": "node --check bin/launch.mjs" }
+  "scripts": { "test": "node --experimental-strip-types --test tests/*.test.ts", "test:standalone": "node --experimental-strip-types --test tests/standalone.test.ts", "check": "node --check bin/launch.mjs" }
 }
