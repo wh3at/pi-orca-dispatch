@@ -27,7 +27,7 @@ The Orca CLI is located without any extension-specific configuration:
 
 `ORCA_CLI_COMMAND` overrides the lookup, and `ORCA_DEV_REPO_ROOT` selects `orca-dev` for Orca development checkouts.
 
-Both Node.js-installed Pi and standalone Pi are supported. The child always uses the parent's Pi installation: Node.js plus the same entrypoint for Node.js-installed Pi, or the same executable directly for standalone Pi. The launcher runs separately under a verified Node.js executable. Missing or outdated Node.js and unrecognized Pi launch forms stop dispatch before creating session files, jobs, or panes.
+Both Node.js-installed Pi and standalone Pi are supported.
 
 ### Pi peer dependencies
 
@@ -130,8 +130,6 @@ Run `npm test` and `npm run check` for the regular suite. The standalone process
 ```bash
 PI_TEST_STANDALONE=/absolute/path/to/pi npm run test:standalone
 ```
-
-The test pins the binary's SHA-256 to `61a84400938da652ed69aac9c1ad2ca23af3c9bd8cc2f46ce571ed84ae6a35e5` and checks its version. It resolves a launch plan inside that real binary, executes the launcher and child TUI in a pseudo-terminal, checks the accepted instruction and inherited session/settings, tests nested dispatch and duplicate-launch rejection, and exits before any model request. Orca terminal creation is substituted; this test does not verify Orca's pane UI.
 
 ## License
 
