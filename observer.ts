@@ -156,11 +156,17 @@ export default function observer(pi: ObserverAPI): void {
     }
     const missing = missingTools();
     if (missing.length) throw new Error(`Required tools are unavailable: ${missing.join(", ")}.`);
-    pi.setActiveTools([...job!.activeTools]);
+    const expected = job!.activeTools;
+    pi.setActiveTools([...expected]);
     if (pi.getActiveTools) {
-      const active = new Set(pi.getActiveTools());
-      if (active.size !== new Set(job!.activeTools).size || job!.activeTools.some((name) => !active.has(name))) {
-        throw new Error("The requested tool selection could not be restored.");
+      let active = pi.getActiveTools();
+      if (active.length === expected.length && active.some((name, index) => name !== expected[index])) {
+        pi.setActiveTools([]);
+        pi.setActiveTools([...expected]);
+        active = pi.getActiveTools();
+      }
+      if (active.length !== expected.length || active.some((name, index) => name !== expected[index])) {
+        throw new Error("The requested tool selection and order could not be restored.");
       }
     }
   }

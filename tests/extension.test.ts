@@ -24,6 +24,7 @@ test("extension exposes one independent command and cancelling its editor does n
       getSessionFile: () => undefined, getLeafId: () => null,
       getHeader: () => ({ type: "session", version: 3, id: "parent", cwd: directory, timestamp: "2026-09-15" }),
       getBranch: () => [],
+      getLabel: () => undefined,
     },
     isIdle: () => true,
     ui: {

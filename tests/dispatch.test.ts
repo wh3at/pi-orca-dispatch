@@ -34,6 +34,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
     getHeader: () => header, getBranch: () => entries,
     getSessionId: () => header.id, getSessionFile: () => parent,
     getLeafId: () => entries.at(-1)?.id ?? null,
+    getLabel: (_id: string): string | undefined => undefined,
   };
   const input = { manager, sessionDir, cwd, configPath: join(root, "orca-dispatch.json"), sourceTerminalHandle: "source-pane", model: { provider: "provider", id: "exact/model" }, thinkingLevel: "medium", activeTools: ["read", "bash", "custom_tool"], packageDir, launchCommand: { launcherNode: process.execPath, command: [process.execPath, join(root, "fake-pi.mjs")], resourceArgs: [] as string[] } };
   return { root, cwd, sessionDir, header, entries, parent, original, manager, input };
@@ -178,6 +179,7 @@ test("a tab without pi startup acknowledgement becomes unconfirmed instead of ru
 
 test("cleanup removes jobs but only the snapshots the child never used", async (t) => {
   const f = await fixture(t);
+  f.manager.getLabel = (id: string) => id === "a" ? "current label" : undefined;
   const launch = {
     preflight: async () => ({ worktreeId: "pinned", worktreePath: f.root }),
     launchTerminal: async () => ({ handle: "term-1" }),

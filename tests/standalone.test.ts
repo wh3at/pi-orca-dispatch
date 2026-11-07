@@ -46,8 +46,8 @@ test("pinned standalone pi launches through Node, accepts the instruction once, 
   const model = { provider: "anthropic", id: "claude-sonnet-4-5" };
   const prompt = "Implement plan B.\nSpaces and 'quotes' must survive.";
   const stored = await dispatchTask(prompt, {
-    manager: { getHeader: () => header, getBranch: () => entries, getSessionId: () => header.id, getSessionFile: () => parent, getLeafId: () => "prior" },
-    sessionDir, cwd: root, model, thinkingLevel: "medium", activeTools: ["read", "bash"], packageDir,
+    manager: { getHeader: () => header, getBranch: () => entries, getSessionId: () => header.id, getSessionFile: () => parent, getLeafId: () => "prior", getLabel: () => undefined },
+    sessionDir, cwd: root, model, thinkingLevel: "medium", activeTools: ["bash", "read"], packageDir,
     sourceTerminalHandle: "test-pane", configPath: join(root, "config.json"), launchCommand: actual.plan,
   }, {
     preflight: async () => ({ worktreeId: "test-worktree", worktreePath: root }),
@@ -69,7 +69,7 @@ test("pinned standalone pi launches through Node, accepts the instruction once, 
   assert.equal(observed.sessionFile, stored.job.sessionFile);
   assert.deepEqual(observed.model, model);
   assert.equal(observed.thinking, "medium");
-  assert.deepEqual(observed.tools, ["read", "bash"]);
+  assert.deepEqual(observed.tools, ["bash", "read"]);
   assert.ok(observed.branch.some((entry: any) => entry.id === "prior"));
   assert.deepEqual(observed.plan.command, [actual.executable]);
   assert.deepEqual(observed.nested.job.command, [actual.executable]);

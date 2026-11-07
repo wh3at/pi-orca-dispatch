@@ -85,7 +85,7 @@ export async function dispatchTask(
     sourceLeafId: snapshot.leafId,
     sessionFile: child.sessionFile,
     // Lets cleanup tell an untouched snapshot from a conversation worked on in the child.
-    snapshotLines: snapshot.entries.length + 2,
+    snapshotLines: child.snapshotLines,
     cwd: input.cwd,
     title,
     command: launch.command,
