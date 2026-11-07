@@ -10,6 +10,7 @@ export interface SnapshotSessionManager {
   getSessionId(): string;
   getSessionFile(): string | undefined;
   getLeafId(): string | null;
+  getLabel(id: string): string | undefined;
 }
 
 export interface SnapshotHeader extends Record<string, unknown> {
@@ -31,6 +32,7 @@ export interface SnapshotEntry extends Record<string, unknown> {
 export interface SessionSnapshot {
   header: SnapshotHeader;
   entries: SnapshotEntry[];
+  labels: { targetId: string; label: string }[];
   parentSessionId: string;
   parentSessionFile?: string;
   leafId: string | null;
@@ -44,6 +46,7 @@ export interface WriteSnapshotOptions {
 export interface WrittenSnapshot {
   sessionId: string;
   sessionFile: string;
+  snapshotLines: number;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -134,9 +137,14 @@ export function captureSnapshot(
     throw new Error("The parent session has no valid header.");
   }
   const parentSessionFile = manager.getSessionFile();
+  const entries = manager.getBranch() as SnapshotEntry[];
   const snapshot = copyJson({
     header: { ...sourceHeader, cwd } as SnapshotHeader,
-    entries: manager.getBranch() as SnapshotEntry[],
+    entries,
+    labels: entries.filter((entry) => entry.type !== "label").flatMap((entry) => {
+      const label = manager.getLabel(entry.id);
+      return label ? [{ targetId: entry.id, label }] : [];
+    }),
     parentSessionId: manager.getSessionId(),
     ...(parentSessionFile === undefined ? {} : { parentSessionFile }),
     leafId: manager.getLeafId(),
@@ -178,19 +186,38 @@ export async function writeSnapshot(
       ? {}
       : { parentSession: captured.parentSessionFile }),
   };
-  const existingIds = new Set(captured.entries.map((entry) => entry.id));
-  let titleEntryId: string;
-  do {
-    titleEntryId = randomUUID();
-  } while (existingIds.has(titleEntryId));
+  const entries = [...captured.entries];
+  const existingIds = new Set(entries.map((entry) => entry.id));
+  function nextEntryId(): string {
+    let id: string;
+    do {
+      id = randomUUID();
+    } while (existingIds.has(id));
+    existingIds.add(id);
+    return id;
+  }
+  const branchLabels = new Map<unknown, unknown>();
+  for (const entry of entries) {
+    if (entry.type === "label") branchLabels.set(entry.targetId, entry.label || undefined);
+  }
+  const labels = new Map(captured.labels.map(({ targetId, label }) => [targetId, label]));
+  let parentId = captured.leafId;
+  for (const entry of captured.entries) {
+    if (entry.type === "label") continue;
+    const label = labels.get(entry.id);
+    if (label === branchLabels.get(entry.id)) continue;
+    const id = nextEntryId();
+    entries.push({ type: "label", id, parentId, timestamp, targetId: entry.id, label });
+    parentId = id;
+  }
   const titleEntry: SnapshotEntry = {
     type: "session_info",
-    id: titleEntryId,
-    parentId: captured.leafId,
+    id: nextEntryId(),
+    parentId,
     timestamp,
     name: options.title.trim(),
   };
-  const contents = [header, ...captured.entries, titleEntry]
+  const contents = [header, ...entries, titleEntry]
     .map((entry) => JSON.stringify(entry))
     .join("\n") + "\n";
 
@@ -203,7 +230,7 @@ export async function writeSnapshot(
     await handle.writeFile(contents, "utf8");
     await handle.close();
     handle = undefined;
-    return { sessionId, sessionFile };
+    return { sessionId, sessionFile, snapshotLines: entries.length + 2 };
   } catch (error) {
     await handle?.close().catch(() => undefined);
     if (created) await unlink(sessionFile).catch(() => undefined);

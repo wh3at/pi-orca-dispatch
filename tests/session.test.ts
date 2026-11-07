@@ -36,6 +36,10 @@ function fixture(entries: SnapshotEntry[], parentSessionFile?: string) {
     getSessionId: () => header.id,
     getSessionFile: () => parentSessionFile,
     getLeafId: () => entries.at(-1)?.id ?? null,
+    getLabel: (id) => {
+      const latest = entries.findLast((entry) => entry.type === "label" && entry.targetId === id);
+      return typeof latest?.label === "string" ? latest.label || undefined : undefined;
+    },
   };
   return { manager, header };
 }
@@ -115,6 +119,51 @@ test("preserves compaction, label chains, custom state, models and external refe
     cursor = byId.get(cursor.parentId);
   }
   assert.deepEqual(reconstructed.slice(0, -1), entries.map((value) => value.id));
+});
+
+test("inherits current labels changed outside the active branch without rewriting history", async (t) => {
+  const directory = await tempDirectory(t);
+  for (const scenario of [
+    { name: "added", previous: undefined, current: "current label" },
+    { name: "renamed", previous: "old label", current: "current label" },
+    { name: "cleared", previous: "old label", current: undefined },
+  ]) {
+    const user = entry("user", null, { type: "message", message: { role: "user", content: "Keep this" } });
+    const entries = [user];
+    if (scenario.previous) {
+      entries.push(entry("label", "user", { type: "label", targetId: "user", label: scenario.previous }));
+    }
+    const parentFile = join(directory, `${scenario.name}.jsonl`);
+    const { manager, header } = fixture(entries, parentFile);
+    const original = [header, ...entries].map((value) => JSON.stringify(value)).join("\n") + "\n";
+    await writeFile(parentFile, original);
+    let current = scenario.current;
+    const snapshot = captureSnapshot({
+      ...manager,
+      getLabel: (id: string) => id === "user" ? current : undefined,
+    }, "/project");
+    current = "changed after capture";
+    const child = await writeSnapshot(snapshot, { sessionDir: directory, title: scenario.name });
+    const saved = await readEntries(child.sessionFile);
+    const labels = new Map();
+    for (const value of saved) {
+      if (value.type !== "label") continue;
+      if (value.label) labels.set(value.targetId, value.label);
+      else labels.delete(value.targetId);
+    }
+    assert.equal(labels.get("user"), scenario.current, scenario.name);
+    assert.deepEqual(saved.slice(1, entries.length + 1), entries);
+    assert.equal(snapshot.leafId, entries.at(-1)?.id);
+    assert.equal(child.snapshotLines, saved.length);
+    assert.equal(await readFile(parentFile, "utf8"), original);
+    const byId = new Map(saved.slice(1).map((value) => [value.id, value]));
+    let cursor = saved.at(-1);
+    for (let index = saved.length - 1; index > 0; index--) {
+      assert.equal(cursor?.id, saved[index].id);
+      cursor = byId.get(cursor?.parentId);
+    }
+    assert.equal(cursor, undefined);
+  }
 });
 
 test("snapshot copies are independent and writing never mutates the source", async (t) => {
